@@ -98,7 +98,7 @@ TOTAL_STEPS_PER_UNIVERSE_DOMAIN_TASK = {
         },
         'HalfCheetah': {
             DEFAULT_KEY: int(3e6),
-            'v3': int(3e6),
+            'v3': int(3e5),
         },
         'Walker2d': {
             DEFAULT_KEY: int(3e6),
