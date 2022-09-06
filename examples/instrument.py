@@ -217,7 +217,7 @@ Number of total trials (including samples/seeds): {total_number_of_trials}
     print(experiments_info_text)
 
 
-def run_example_local(example_module_name, example_argv, local_mode=False):
+def run_example_local(example_module_name, *example_argv, local_mode=False):
     """Run example locally, potentially parallelizing across cpus/gpus."""
     example_module = importlib.import_module(example_module_name)
 

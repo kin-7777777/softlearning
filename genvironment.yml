@@ -7,9 +7,8 @@ dependencies:
 - python>=3.8,<3.9
 - pip>=20.0
 - conda>=4.8
-- pytorch==1.10.1
-- torchvision==0.11.2
 - cudatoolkit==11.0.221
 - nvidia::cudnn==8.0.4
 - pip:
+    - -f https://download.pytorch.org/whl/torch_stable.html
     - -r ./grequirements.txt

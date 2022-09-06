@@ -13,6 +13,7 @@ from .rl_algorithm import RLAlgorithm
 import os
 import copy
 import torch
+import tree # for flattening batch OrderedDict objects for gamma
 
 from gamma.flows import (
     make_conditional_flow,
@@ -26,7 +27,7 @@ from gamma.td.structs import (
 )
 from gamma.td.utils import (
     soft_update_from_to,
-    format_batch,
+    format_batch_sac, # custom version
 )
 from gamma.utils import (
     mkdir,
@@ -194,11 +195,29 @@ class SAC_G(RLAlgorithm):
         self._alpha_optimizer = tf.optimizers.Adam(
             self._alpha_lr, name='alpha_optimizer')
         
+        ##################################################
         # Gamma model, adaped from gamma-models repo
+        # Start initialization here
+        ##################################################
+        
         self._gamma_args = Args()
 
         mkdir(self._gamma_args.save_path)
         set_device(self._gamma_args.device)
+        
+        observation_dim = tree.flatten(self._training_environment.observation_shape)[0][0]
+        action_dim = self._training_environment.action_shape[0]
+        
+        ## initialize conditional spline flow
+        self._gamma_model = make_conditional_flow(observation_dim, self._gamma_args.hidden_dims, {'s': observation_dim, 'a': action_dim})
+        
+        ## target model is analogous to a target Q-function
+        self._target_gamma_model = copy.deepcopy(self._gamma_model)
+
+        ## bootstrapped target distribution is mixture of
+        ## single-step gaussian (with weight `1 - discount`)
+        ## and target model (with weight `discount`)
+        self._gamma_bootstrap = BootstrapTarget(self._target_gamma_model, self._gamma_args.discount)
 
     @tf.function(experimental_relax_shapes=True)
     def _compute_Q_targets(self, batch):
@@ -227,9 +246,31 @@ class SAC_G(RLAlgorithm):
 
         return tf.stop_gradient(Q_targets)
     
-    def _update_gamma(self):
+    def _update_gamma(self, batch):
         
-        return
+        for i in range(self._gamma_args.n_steps):
+            if i < self._gamma_args.n_burnin and False:
+                ## initialize model with a lower discount to speed up training
+                self._gamma_bootstrap.update_discount(self._gamma_args.burnin_discount)
+                sample_discount = self._gamma_args.burnin_discount
+            else:
+                self._gamma_bootstrap.update_discount(self._gamma_args.discount)
+                sample_discount = self._gamma_args.sample_discount
+    
+        ## batch contains the usual Q-learning entries (s, a, s', r, t)
+        # Convert from softlearning batch format to gamma-models format
+        batch_torch = dict()
+        for key, value in batch.items():
+            # print(key)
+            flattened = tree.flatten(value)[0]
+            if flattened.dtype == np.dtype(np.uint64):
+                flattened = flattened.astype(np.dtype(np.int64))
+            batch_torch[key] = torch.from_numpy(flattened)
+            # print(np.shape(batch_torch[key]))
+        # print(batch_torch.keys())
+        
+        ## condition dicts contain keys (s, a)
+        condition_dict, next_condition_dict = format_batch_sac(batch_torch, self._policy)
 
     @tf.function(experimental_relax_shapes=True)
     def _update_critic(self, batch):
@@ -341,6 +382,7 @@ class SAC_G(RLAlgorithm):
         Qs_values, Qs_losses = self._update_critic(batch)
         policy_losses = self._update_actor(batch)
         alpha_losses = self._update_alpha(batch)
+        self._update_gamma(batch)
 
         diagnostics = OrderedDict((
             ('Q_value-mean', tf.reduce_mean(Qs_values)),
